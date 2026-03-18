@@ -1,0 +1,92 @@
+{
+  "entities": {
+    "User": {
+      "title": "User Profile",
+      "description": "User's fitness profile and gamification stats.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "description": "Firebase Auth UID" },
+        "displayName": { "type": "string" },
+        "email": { "type": "string" },
+        "height": { "type": "number", "description": "Height in cm" },
+        "goalWeight": { "type": "number", "description": "Goal weight in kg" },
+        "currentWeight": { "type": "number", "description": "Current weight in kg" },
+        "streak": { "type": "integer", "description": "Consistency streak in days" },
+        "xp": { "type": "integer", "description": "Experience points" },
+        "level": { "type": "integer", "description": "User level" },
+        "lastWorkoutDate": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "email"]
+    },
+    "Workout": {
+      "title": "Workout Session",
+      "description": "A single workout session (Push, Pull, or Legs).",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "date": { "type": "string", "format": "date-time" },
+        "type": { "type": "string", "enum": ["Push", "Pull", "Legs"] },
+        "duration": { "type": "integer", "description": "Duration in seconds" },
+        "volume": { "type": "number", "description": "Total volume lifted" }
+      },
+      "required": ["uid", "date", "type"]
+    },
+    "ExerciseLog": {
+      "title": "Exercise Log",
+      "description": "Performance data for a specific exercise in a workout.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "workoutId": { "type": "string" },
+        "exerciseName": { "type": "string" },
+        "date": { "type": "string", "format": "date-time" },
+        "sets": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "weight": { "type": "number" },
+              "reps": { "type": "integer" }
+            }
+          }
+        },
+        "level": { "type": "integer", "description": "Achieved level for this exercise" },
+        "progression": { "type": "string", "enum": ["LEVEL UP", "PROGRESS", "STAGNANT", "REGRESSION"] }
+      },
+      "required": ["uid", "exerciseName", "date", "sets"]
+    },
+    "BodyMetric": {
+      "title": "Body Metric Entry",
+      "description": "Weekly body measurement entry.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "date": { "type": "string", "format": "date-time" },
+        "weight": { "type": "number" },
+        "chest": { "type": "number" },
+        "arms": { "type": "number" },
+        "waist": { "type": "number" }
+      },
+      "required": ["uid", "date", "weight"]
+    },
+    "WorkoutPlan": {
+      "title": "Workout Plan",
+      "description": "A full 7-day workout split.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "name": { "type": "string" },
+        "days": { "type": "object" },
+        "isActive": { "type": "boolean" }
+      },
+      "required": ["uid", "name", "days"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": { "schema": "User", "description": "User profiles" },
+    "/workouts/{workoutId}": { "schema": "Workout", "description": "Workout sessions" },
+    "/exerciseLogs/{logId}": { "schema": "ExerciseLog", "description": "Exercise performance logs" },
+    "/bodyMetrics/{metricId}": { "schema": "BodyMetric", "description": "Body measurement history" },
+    "/workoutPlans/{planId}": { "schema": "WorkoutPlan", "description": "Custom workout plans" }
+  }
+}
