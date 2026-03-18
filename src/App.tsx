@@ -1,185 +1,138 @@
-import React, { useState, useEffect } from 'react';
-import { auth, db } from './firebase';
-import { onAuthStateChanged } from 'firebase/auth';
-import { doc, getDoc, onSnapshot } from 'firebase/firestore';
-import { UserProfile, WorkoutType, WorkoutDayPlan } from './types';
-import { Auth } from './components/Auth';
-import { Dashboard } from './components/Dashboard';
-import { WorkoutTracker } from './components/WorkoutTracker';
-import { ProgressCharts } from './components/ProgressCharts';
-import { Profile } from './components/Profile';
-import { PlanEditor } from './components/PlanEditor';
-import { ErrorBoundary } from './components/ErrorBoundary';
-import { LayoutGrid, Dumbbell, BarChart3, User, Loader2 } from 'lucide-react';
-import { motion, AnimatePresence } from 'motion/react';
-import { clsx } from 'clsx';
+import React, { useEffect, useState } from 'react';
+import { auth, db } from '../firebase';
+import { signInWithPopup, GoogleAuthProvider, signInWithRedirect, AuthError, getRedirectResult, User } from 'firebase/auth';
+import { doc, getDoc, setDoc, collection } from 'firebase/firestore';
+import { UserProfile, WorkoutPlan } from '../types';
+import { DEFAULT_PLAN } from '../constants';
+import { Dumbbell, LogIn, LogOut } from 'lucide-react';
+import { motion } from 'motion/react';
 
-export default function App() {
-  const [user, setUser] = useState<UserProfile | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'workout' | 'analytics' | 'profile' | 'plan-editor'>('dashboard');
-  const [activeWorkout, setActiveWorkout] = useState<WorkoutDayPlan | null>(null);
+export const Auth: React.FC<{ onUserChange: (user: UserProfile | null) => void }> = ({ onUserChange }) => {
+  const [loading, setLoading] = useState(false);
+  const [errorMessage, setErrorMessage] = useState('');
+
+  const upsertUserProfile = async (firebaseUser: User) => {
+    const userDoc = await getDoc(doc(db, 'users', firebaseUser.uid));
+    if (!userDoc.exists()) {
+      const planRef = doc(collection(db, 'workoutPlans'));
+      const newPlan: WorkoutPlan = {
+        ...DEFAULT_PLAN,
+        uid: firebaseUser.uid,
+        id: planRef.id
+      };
+      await setDoc(planRef, newPlan);
+
+      const newUser: UserProfile = {
+        uid: firebaseUser.uid,
+        displayName: firebaseUser.displayName || 'Iron Athlete',
+        email: firebaseUser.email || '',
+        streak: 0,
+        xp: 0,
+        level: 1,
+        activePlanId: planRef.id
+      };
+      await setDoc(doc(db, 'users', firebaseUser.uid), newUser);
+      onUserChange(newUser);
+    } else {
+      onUserChange(userDoc.data() as UserProfile);
+    }
+  };
 
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
-      if (firebaseUser) {
-        // Use onSnapshot for real-time user updates
-        const userDocRef = doc(db, 'users', firebaseUser.uid);
-        const unsubDoc = onSnapshot(userDocRef, (docSnap) => {
-          if (docSnap.exists()) {
-            const userData = docSnap.data() as UserProfile;
-            // Calculate level based on XP
-            const level = Math.floor(userData.xp / 1000) + 1;
-            setUser({ ...userData, level });
-          } else {
-            setUser(null);
-          }
-          setLoading(false);
-        }, (error) => {
-          console.error('User doc snapshot error:', error);
-          setLoading(false);
-        });
-        return () => unsubDoc();
-      } else {
-        setUser(null);
-        setLoading(false);
-      }
-    });
-    return () => unsubscribe();
+    getRedirectResult(auth)
+      .then((result) => {
+        if (result?.user) {
+          upsertUserProfile(result.user);
+        }
+      })
+      .catch((err) => {
+        console.error('Redirect auth error:', err);
+        setErrorMessage((err as AuthError)?.message || 'Unable to complete sign in.');
+      });
   }, []);
 
-  if (loading) {
-    return (
-      <div className="min-h-screen bg-black flex flex-col items-center justify-center space-y-4">
-        <Loader2 className="w-12 h-12 text-emerald-500 animate-spin" />
-        <p className="text-zinc-500 font-black italic uppercase tracking-widest animate-pulse">Initializing Protocol...</p>
-      </div>
-    );
-  }
+  const handleSignIn = async () => {
+    setLoading(true);
+    const provider = new GoogleAuthProvider();
+    provider.setCustomParameters({ prompt: 'select_account' });
+    try {
+      const result = await signInWithPopup(auth, provider);
+      if (result?.user) {
+        await upsertUserProfile(result.user);
+      }
+    } catch (error) {
+      const err = error as AuthError;
+      console.error('Auth error:', err);
 
-  if (!user) {
-    return <Auth onUserChange={setUser} />;
-  }
+      // If popup is blocked or third-party cookies are off, fall back to redirect which works without popups.
+      if (err?.code === 'auth/popup-blocked' || err?.code === 'auth/popup-closed-by-user') {
+        await signInWithRedirect(auth, provider);
+        return;
+      }
 
-  const renderContent = () => {
-    if (activeWorkout) {
-      return (
-        <ErrorBoundary>
-          <WorkoutTracker 
-            user={user} 
-            plan={activeWorkout} 
-            onComplete={() => {
-              setActiveWorkout(null);
-              setActiveTab('dashboard');
-            }} 
-          />
-        </ErrorBoundary>
-      );
-    }
-
-    switch (activeTab) {
-      case 'dashboard':
-        return (
-          <ErrorBoundary>
-            <Dashboard user={user} onStartWorkout={(plan) => setActiveWorkout(plan)} />
-          </ErrorBoundary>
-        );
-      case 'analytics':
-        return (
-          <ErrorBoundary>
-            <ProgressCharts user={user} />
-          </ErrorBoundary>
-        );
-      case 'profile':
-        return (
-          <ErrorBoundary>
-            <Profile user={user} onUpdate={setUser} onEditPlan={() => setActiveTab('plan-editor')} />
-          </ErrorBoundary>
-        );
-      case 'plan-editor':
-        if (!user.activePlanId) {
-          setActiveTab('profile');
-          return null;
-        }
-        return (
-          <ErrorBoundary>
-            <PlanEditor planId={user.activePlanId} onBack={() => setActiveTab('profile')} />
-          </ErrorBoundary>
-        );
-      default:
-        return (
-          <ErrorBoundary>
-            <Dashboard user={user} onStartWorkout={(plan) => setActiveWorkout(plan)} />
-          </ErrorBoundary>
-        );
+      // Surface a helpful hint for common domain/origin misconfigurations.
+      if (err?.code === 'auth/unauthorized-domain') {
+        setErrorMessage('Sign-in blocked: add your dev origin (e.g., http://localhost:3000) to Firebase Auth > Authorized domains and to your Google OAuth client origins.');
+      } else {
+        setErrorMessage(err?.message || 'Unable to sign in. Please try again.');
+      }
+    } finally {
+      setLoading(false);
     }
   };
 
   return (
-    <div className="min-h-screen bg-black text-white font-sans selection:bg-emerald-500/30">
-      <main className="max-w-md mx-auto px-6 pt-12 min-h-screen">
-        <AnimatePresence mode="wait">
-          <motion.div
-            key={activeTab + (activeWorkout ? activeWorkout.type + activeWorkout.dayType : '')}
-            initial={{ opacity: 0, x: 10 }}
-            animate={{ opacity: 1, x: 0 }}
-            exit={{ opacity: 0, x: -10 }}
-            transition={{ duration: 0.2 }}
-          >
-            {renderContent()}
-          </motion.div>
-        </AnimatePresence>
-      </main>
-
-      {!activeWorkout && (
-        <nav className="fixed bottom-0 left-0 right-0 bg-zinc-900/80 backdrop-blur-2xl border-t border-zinc-800/50 pb-8 pt-4 px-8 z-50">
-          <div className="max-w-md mx-auto flex items-center justify-between">
-            <NavButton 
-              active={activeTab === 'dashboard'} 
-              onClick={() => setActiveTab('dashboard')} 
-              icon={<LayoutGrid className="w-6 h-6" />} 
-              label="Home"
-            />
-            <NavButton 
-              active={activeTab === 'workout'} 
-              onClick={() => setActiveTab('dashboard')} // Redirect to dashboard to start workout
-              icon={<Dumbbell className="w-6 h-6" />} 
-              label="Train"
-            />
-            <NavButton 
-              active={activeTab === 'analytics'} 
-              onClick={() => setActiveTab('analytics')} 
-              icon={<BarChart3 className="w-6 h-6" />} 
-              label="Stats"
-            />
-            <NavButton 
-              active={activeTab === 'profile'} 
-              onClick={() => setActiveTab('profile')} 
-              icon={<User className="w-6 h-6" />} 
-              label="Pro"
-            />
+    <div className="flex flex-col items-center justify-center min-h-screen bg-black text-white p-6">
+      <motion.div 
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        className="text-center space-y-8 max-w-md w-full"
+      >
+        <div className="flex justify-center">
+          <div className="p-6 bg-emerald-500/20 rounded-full border-2 border-emerald-500/50 shadow-[0_0_30px_rgba(16,185,129,0.2)]">
+            <Dumbbell className="w-16 h-16 text-emerald-500" />
           </div>
-        </nav>
-      )}
+        </div>
+        
+        <div className="space-y-2">
+          <h1 className="text-5xl font-black tracking-tighter uppercase italic">
+            Iron <span className="text-emerald-500">Ascend</span>
+          </h1>
+          <p className="text-zinc-400 font-medium">
+            Forge your physique. Track your progression. Level up your strength.
+          </p>
+        </div>
+
+        <button
+          onClick={handleSignIn}
+          disabled={loading}
+          className="w-full flex items-center justify-center gap-3 bg-white text-black font-bold py-4 px-6 rounded-xl hover:bg-emerald-500 hover:text-white transition-all duration-300 transform active:scale-95 disabled:opacity-50"
+        >
+          <LogIn className="w-5 h-5" />
+          {loading ? 'CONNECTING...' : 'SIGN IN WITH GOOGLE'}
+        </button>
+
+        {errorMessage && (
+          <div className="rounded-lg border border-emerald-500/40 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-100">
+            {errorMessage}
+          </div>
+        )}
+
+        <div className="grid grid-cols-3 gap-4 pt-12 border-t border-zinc-800">
+          <div className="text-center">
+            <div className="text-2xl font-bold text-emerald-500">100%</div>
+            <div className="text-[10px] uppercase tracking-widest text-zinc-500 font-bold">Natural</div>
+          </div>
+          <div className="text-center">
+            <div className="text-2xl font-bold text-emerald-500">PPL</div>
+            <div className="text-[10px] uppercase tracking-widest text-zinc-500 font-bold">Focused</div>
+          </div>
+          <div className="text-center">
+            <div className="text-2xl font-bold text-emerald-500">PRO</div>
+            <div className="text-[10px] uppercase tracking-widest text-zinc-500 font-bold">Tracking</div>
+          </div>
+        </div>
+      </motion.div>
     </div>
   );
-}
-
-const NavButton = ({ active, onClick, icon, label }: { active: boolean, onClick: () => void, icon: React.ReactNode, label: string }) => (
-  <button 
-    onClick={onClick}
-    className={clsx(
-      "flex flex-col items-center gap-1 transition-all duration-300 relative",
-      active ? "text-emerald-500 scale-110" : "text-zinc-600 hover:text-zinc-400"
-    )}
-  >
-    {active && (
-      <motion.div 
-        layoutId="nav-active"
-        className="absolute -top-1 w-1 h-1 bg-emerald-500 rounded-full"
-      />
-    )}
-    {icon}
-    <span className="text-[10px] font-black uppercase tracking-widest">{label}</span>
-  </button>
-);
+};
