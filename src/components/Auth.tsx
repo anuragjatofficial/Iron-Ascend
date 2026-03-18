@@ -1,6 +1,6 @@
-import React, { useEffect, useState } from 'react';
+import React, { useState } from 'react';
 import { auth, db } from '../firebase';
-import { signInWithPopup, GoogleAuthProvider, signInWithRedirect, AuthError, getRedirectResult, User } from 'firebase/auth';
+import { signInWithPopup, GoogleAuthProvider, signOut } from 'firebase/auth';
 import { doc, getDoc, setDoc, collection } from 'firebase/firestore';
 import { UserProfile, WorkoutPlan } from '../types';
 import { DEFAULT_PLAN } from '../constants';
@@ -9,73 +9,40 @@ import { motion } from 'motion/react';
 
 export const Auth: React.FC<{ onUserChange: (user: UserProfile | null) => void }> = ({ onUserChange }) => {
   const [loading, setLoading] = useState(false);
-  const [errorMessage, setErrorMessage] = useState('');
-
-  const upsertUserProfile = async (firebaseUser: User) => {
-    const userDoc = await getDoc(doc(db, 'users', firebaseUser.uid));
-    if (!userDoc.exists()) {
-      const planRef = doc(collection(db, 'workoutPlans'));
-      const newPlan: WorkoutPlan = {
-        ...DEFAULT_PLAN,
-        uid: firebaseUser.uid,
-        id: planRef.id
-      };
-      await setDoc(planRef, newPlan);
-
-      const newUser: UserProfile = {
-        uid: firebaseUser.uid,
-        displayName: firebaseUser.displayName || 'Iron Athlete',
-        email: firebaseUser.email || '',
-        streak: 0,
-        xp: 0,
-        level: 1,
-        activePlanId: planRef.id
-      };
-      await setDoc(doc(db, 'users', firebaseUser.uid), newUser);
-      onUserChange(newUser);
-    } else {
-      onUserChange(userDoc.data() as UserProfile);
-    }
-  };
-
-  useEffect(() => {
-    getRedirectResult(auth)
-      .then((result) => {
-        if (result?.user) {
-          upsertUserProfile(result.user);
-        }
-      })
-      .catch((err) => {
-        console.error('Redirect auth error:', err);
-        setErrorMessage((err as AuthError)?.message || 'Unable to complete sign in.');
-      });
-  }, []);
 
   const handleSignIn = async () => {
     setLoading(true);
     const provider = new GoogleAuthProvider();
-    provider.setCustomParameters({ prompt: 'select_account' });
     try {
       const result = await signInWithPopup(auth, provider);
-      if (result?.user) {
-        await upsertUserProfile(result.user);
+      const user = result.user;
+      
+      const userDoc = await getDoc(doc(db, 'users', user.uid));
+      if (!userDoc.exists()) {
+        const planRef = doc(collection(db, 'workoutPlans'));
+        const newPlan: WorkoutPlan = {
+          ...DEFAULT_PLAN,
+          uid: user.uid,
+          id: planRef.id
+        };
+        await setDoc(planRef, newPlan);
+
+        const newUser: UserProfile = {
+          uid: user.uid,
+          displayName: user.displayName || 'Iron Athlete',
+          email: user.email || '',
+          streak: 0,
+          xp: 0,
+          level: 1,
+          activePlanId: planRef.id
+        };
+        await setDoc(doc(db, 'users', user.uid), newUser);
+        onUserChange(newUser);
+      } else {
+        onUserChange(userDoc.data() as UserProfile);
       }
     } catch (error) {
-      const err = error as AuthError;
-      console.error('Auth error:', err);
-
-      // If popup is blocked or third-party cookies are off, fall back to redirect which works without popups.
-      if (err?.code === 'auth/popup-blocked' || err?.code === 'auth/popup-closed-by-user') {
-        await signInWithRedirect(auth, provider);
-        return;
-      }
-
-      // Surface a helpful hint for common domain/origin misconfigurations.
-      if (err?.code === 'auth/unauthorized-domain') {
-        setErrorMessage('Sign-in blocked: add your dev origin (e.g., http://localhost:3000) to Firebase Auth > Authorized domains and to your Google OAuth client origins.');
-      } else {
-        setErrorMessage(err?.message || 'Unable to sign in. Please try again.');
-      }
+      console.error('Auth error:', error);
     } finally {
       setLoading(false);
     }
@@ -111,12 +78,6 @@ export const Auth: React.FC<{ onUserChange: (user: UserProfile | null) => void }
           <LogIn className="w-5 h-5" />
           {loading ? 'CONNECTING...' : 'SIGN IN WITH GOOGLE'}
         </button>
-
-        {errorMessage && (
-          <div className="rounded-lg border border-emerald-500/40 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-100">
-            {errorMessage}
-          </div>
-        )}
 
         <div className="grid grid-cols-3 gap-4 pt-12 border-t border-zinc-800">
           <div className="text-center">
