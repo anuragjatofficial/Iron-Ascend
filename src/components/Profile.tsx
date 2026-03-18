@@ -15,18 +15,22 @@ export const Profile: React.FC<{ user: UserProfile, onUpdate: (user: UserProfile
   const handleSave = async () => {
     setSaving(true);
     try {
-      const updatedUser = { ...user, height, goalWeight, currentWeight };
+      const h = isNaN(height) ? 0 : height;
+      const gw = isNaN(goalWeight) ? 0 : goalWeight;
+      const cw = isNaN(currentWeight) ? 0 : currentWeight;
+      
+      const updatedUser = { ...user, height: h, goalWeight: gw, currentWeight: cw };
       await updateDoc(doc(db, 'users', user.uid), {
-        height,
-        goalWeight,
-        currentWeight
+        height: h,
+        goalWeight: gw,
+        currentWeight: cw
       });
       
       // Also log a body metric entry
       await addDoc(collection(db, 'bodyMetrics'), {
         uid: user.uid,
         date: new Date().toISOString(),
-        weight: currentWeight
+        weight: cw
       } as BodyMetric);
 
       onUpdate(updatedUser);

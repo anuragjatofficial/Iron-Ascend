@@ -14,7 +14,13 @@ export const PlanEditor: React.FC<{ planId: string, onBack: () => void }> = ({ p
     const fetchPlan = async () => {
       const docSnap = await getDoc(doc(db, 'workoutPlans', planId));
       if (docSnap.exists()) {
-        setPlan(docSnap.data() as WorkoutPlan);
+        const data = docSnap.data() as WorkoutPlan;
+        // Normalize keys to numbers to prevent string/number mismatch
+        const normalizedDays: any = {};
+        Object.entries(data.days || {}).forEach(([key, value]) => {
+          normalizedDays[parseInt(key)] = value;
+        });
+        setPlan({ ...data, days: normalizedDays });
       }
       setLoading(false);
     };
@@ -28,7 +34,6 @@ export const PlanEditor: React.FC<{ planId: string, onBack: () => void }> = ({ p
         days: plan.days,
         name: plan.name
       });
-      alert('Plan saved successfully!');
     } catch (error) {
       console.error('Save error:', error);
     }

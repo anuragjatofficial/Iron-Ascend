@@ -79,11 +79,11 @@ export const WorkoutTracker: React.FC<{ user: UserProfile, plan: WorkoutDayPlan,
   };
 
   const calculateProgression = (current: Set[], last: ExerciseLog | null): ExerciseLog['progression'] => {
-    if (!last) return 'PROGRESS';
-    const currentMax = Math.max(...current.map(s => s.weight));
-    const lastMax = Math.max(...last.sets.map(s => s.weight));
-    const currentTotalReps = current.reduce((acc, s) => acc + s.reps, 0);
-    const lastTotalReps = last.sets.reduce((acc, s) => acc + s.reps, 0);
+    if (!last || !last.sets) return 'PROGRESS';
+    const currentMax = Math.max(...(current || []).map(s => s?.weight || 0));
+    const lastMax = Math.max(...(last.sets || []).map(s => s?.weight || 0));
+    const currentTotalReps = (current || []).reduce((acc, s) => acc + (s?.reps || 0), 0);
+    const lastTotalReps = (last.sets || []).reduce((acc, s) => acc + (s?.reps || 0), 0);
 
     if (currentMax > lastMax) return 'LEVEL UP';
     if (currentMax === lastMax && currentTotalReps > lastTotalReps) return 'PROGRESS';
@@ -174,10 +174,10 @@ export const WorkoutTracker: React.FC<{ user: UserProfile, plan: WorkoutDayPlan,
             </div>
           )}
 
-          {lastLog && (
+          {lastLog && lastLog.sets && lastLog.sets.length > 0 && (
             <div className="flex items-center gap-2 text-xs font-bold text-zinc-600 border-t border-zinc-800/50 pt-4">
               <span className="uppercase tracking-widest">Last Performance:</span>
-              <span className="text-emerald-500/80">{Math.max(...lastLog.sets.map(s => s.weight))}kg × {lastLog.sets[0].reps}</span>
+              <span className="text-emerald-500/80">{Math.max(...lastLog.sets.map(s => s.weight || 0))}kg × {lastLog.sets[0].reps || 0}</span>
             </div>
           )}
         </div>

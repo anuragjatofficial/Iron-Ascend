@@ -37,7 +37,7 @@ export const Dashboard: React.FC<{ user: UserProfile, onStartWorkout: (plan: Wor
         const snap = await getDocs(q);
         if (!snap.empty) {
           const log = snap.docs[0].data() as ExerciseLog;
-          const maxWeight = Math.max(...log.sets.map(s => s.weight));
+          const maxWeight = Math.max(0, ...(log.sets || []).map(s => s?.weight || 0));
           total += maxWeight;
         }
       }
@@ -61,13 +61,15 @@ export const Dashboard: React.FC<{ user: UserProfile, onStartWorkout: (plan: Wor
   }, [user.uid, user.activePlanId]);
 
   const getTodayWorkout = (): WorkoutDayPlan | null => {
-    if (!activePlan) return null;
+    if (!activePlan || !activePlan.days) return null;
     const day = new Date().getDay(); // 0 (Sun) to 6 (Sat)
+    // Map JS getDay() to our 1-7 system (1=Mon, 7=Sun)
     const dayMap: Record<number, number> = {
       1: 1, 2: 2, 3: 3, 4: 4, 5: 5, 6: 6, 0: 7
     };
     const dayNum = dayMap[day];
-    return activePlan.days[dayNum] || null;
+    // Firestore keys are strings, so we check both to be safe
+    return (activePlan.days[dayNum] || (activePlan.days as any)[dayNum.toString()]) || null;
   };
 
   const todayWorkout = getTodayWorkout();

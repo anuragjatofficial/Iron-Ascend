@@ -9,6 +9,7 @@ import { WorkoutTracker } from './components/WorkoutTracker';
 import { ProgressCharts } from './components/ProgressCharts';
 import { Profile } from './components/Profile';
 import { PlanEditor } from './components/PlanEditor';
+import { ErrorBoundary } from './components/ErrorBoundary';
 import { LayoutGrid, Dumbbell, BarChart3, User, Loader2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { clsx } from 'clsx';
@@ -33,6 +34,9 @@ export default function App() {
           } else {
             setUser(null);
           }
+          setLoading(false);
+        }, (error) => {
+          console.error('User doc snapshot error:', error);
           setLoading(false);
         });
         return () => unsubDoc();
@@ -60,28 +64,54 @@ export default function App() {
   const renderContent = () => {
     if (activeWorkout) {
       return (
-        <WorkoutTracker 
-          user={user} 
-          plan={activeWorkout} 
-          onComplete={() => {
-            setActiveWorkout(null);
-            setActiveTab('dashboard');
-          }} 
-        />
+        <ErrorBoundary>
+          <WorkoutTracker 
+            user={user} 
+            plan={activeWorkout} 
+            onComplete={() => {
+              setActiveWorkout(null);
+              setActiveTab('dashboard');
+            }} 
+          />
+        </ErrorBoundary>
       );
     }
 
     switch (activeTab) {
       case 'dashboard':
-        return <Dashboard user={user} onStartWorkout={(plan) => setActiveWorkout(plan)} />;
+        return (
+          <ErrorBoundary>
+            <Dashboard user={user} onStartWorkout={(plan) => setActiveWorkout(plan)} />
+          </ErrorBoundary>
+        );
       case 'analytics':
-        return <ProgressCharts user={user} />;
+        return (
+          <ErrorBoundary>
+            <ProgressCharts user={user} />
+          </ErrorBoundary>
+        );
       case 'profile':
-        return <Profile user={user} onUpdate={setUser} onEditPlan={() => setActiveTab('plan-editor')} />;
+        return (
+          <ErrorBoundary>
+            <Profile user={user} onUpdate={setUser} onEditPlan={() => setActiveTab('plan-editor')} />
+          </ErrorBoundary>
+        );
       case 'plan-editor':
-        return <PlanEditor planId={user.activePlanId!} onBack={() => setActiveTab('profile')} />;
+        if (!user.activePlanId) {
+          setActiveTab('profile');
+          return null;
+        }
+        return (
+          <ErrorBoundary>
+            <PlanEditor planId={user.activePlanId} onBack={() => setActiveTab('profile')} />
+          </ErrorBoundary>
+        );
       default:
-        return <Dashboard user={user} onStartWorkout={(plan) => setActiveWorkout(plan)} />;
+        return (
+          <ErrorBoundary>
+            <Dashboard user={user} onStartWorkout={(plan) => setActiveWorkout(plan)} />
+          </ErrorBoundary>
+        );
     }
   };
 
@@ -90,7 +120,7 @@ export default function App() {
       <main className="max-w-md mx-auto px-6 pt-12 min-h-screen">
         <AnimatePresence mode="wait">
           <motion.div
-            key={activeTab + (activeWorkout || '')}
+            key={activeTab + (activeWorkout ? activeWorkout.type + activeWorkout.dayType : '')}
             initial={{ opacity: 0, x: 10 }}
             animate={{ opacity: 1, x: 0 }}
             exit={{ opacity: 0, x: -10 }}

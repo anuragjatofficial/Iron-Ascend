@@ -11,8 +11,10 @@ export const ProgressCharts: React.FC<{ user: UserProfile }> = ({ user }) => {
   const [logs, setLogs] = useState<ExerciseLog[]>([]);
   const [metrics, setMetrics] = useState<BodyMetric[]>([]);
   const [loading, setLoading] = useState(true);
+  const [isMounted, setIsMounted] = useState(false);
 
   useEffect(() => {
+    setIsMounted(true);
     const fetchData = async () => {
       const logsSnap = await getDocs(query(collection(db, 'exerciseLogs'), where('uid', '==', user.uid), orderBy('date', 'asc')));
       const metricsSnap = await getDocs(query(collection(db, 'bodyMetrics'), where('uid', '==', user.uid), orderBy('date', 'asc')));
@@ -22,33 +24,39 @@ export const ProgressCharts: React.FC<{ user: UserProfile }> = ({ user }) => {
       setLoading(false);
     };
     fetchData();
+    return () => setIsMounted(false);
   }, [user.uid]);
 
   const getChartData = (exercise: string) => {
+    if (!logs) return [];
     return logs
-      .filter(l => l.exerciseName === exercise)
+      .filter(l => l && l.exerciseName === exercise && l.date && l.sets)
       .map(l => ({
         date: format(parseISO(l.date), 'MMM dd'),
-        weight: Math.max(...l.sets.map(s => s.weight)),
-        volume: l.sets.reduce((acc, s) => acc + s.weight * s.reps, 0)
+        weight: Math.max(...(l.sets || []).map(s => s?.weight || 0)),
+        volume: (l.sets || []).reduce((acc, s) => acc + (s?.weight || 0) * (s?.reps || 0), 0)
       }));
   };
 
   const getWeightData = () => {
-    return metrics.map(m => ({
-      date: format(parseISO(m.date), 'MMM dd'),
-      weight: m.weight
-    }));
+    if (!metrics) return [];
+    return metrics
+      .filter(m => m && m.date && m.weight !== undefined)
+      .map(m => ({
+        date: format(parseISO(m.date), 'MMM dd'),
+        weight: m.weight
+      }));
   };
 
   const getPlateauAlerts = () => {
-    const exercises = Array.from(new Set(logs.map(l => l.exerciseName)));
+    if (!logs || logs.length === 0) return [];
+    const exercises = Array.from(new Set(logs.filter(l => l && l.exerciseName).map(l => l.exerciseName)));
     const alerts: string[] = [];
     
     exercises.forEach(ex => {
-      const exLogs = logs.filter(l => l.exerciseName === ex).slice(-3);
+      const exLogs = logs.filter(l => l && l.exerciseName === ex && l.sets).slice(-3);
       if (exLogs.length === 3) {
-        const weights = exLogs.map(l => Math.max(...l.sets.map(s => s.weight)));
+        const weights = exLogs.map(l => Math.max(...(l.sets || []).map(s => s?.weight || 0)));
         if (weights[0] === weights[1] && weights[1] === weights[2]) {
           alerts.push(`Plateau detected on ${ex}. You've hit the same weight for 3 sessions.`);
         }
@@ -59,7 +67,7 @@ export const ProgressCharts: React.FC<{ user: UserProfile }> = ({ user }) => {
 
   const alerts = getPlateauAlerts();
 
-  if (loading) return <div className="flex items-center justify-center h-64 text-zinc-500 font-black italic uppercase tracking-widest">Analyzing Data...</div>;
+  if (loading || !isMounted) return <div className="flex items-center justify-center h-64 text-zinc-500 font-black italic uppercase tracking-widest">Analyzing Data...</div>;
 
   return (
     <div className="space-y-8 pb-32">
@@ -103,7 +111,7 @@ export const ProgressCharts: React.FC<{ user: UserProfile }> = ({ user }) => {
               </defs>
               <CartesianGrid strokeDasharray="3 3" stroke="#27272a" vertical={false} />
               <XAxis dataKey="date" stroke="#71717a" fontSize={10} tickLine={false} axisLine={false} />
-              <YAxis stroke="#71717a" fontSize={10} tickLine={false} axisLine={false} domain={['dataMin - 2', 'dataMax + 2']} />
+              <YAxis stroke="#71717a" fontSize={10} tickLine={false} axisLine={false} domain={['auto', 'auto']} />
               <Tooltip 
                 contentStyle={{ backgroundColor: '#18181b', border: '1px solid #27272a', borderRadius: '12px' }}
                 itemStyle={{ color: '#10b981', fontWeight: 'bold' }}
