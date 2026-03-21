@@ -13,6 +13,7 @@ import { ErrorBoundary } from './components/ErrorBoundary';
 import { LayoutGrid, Dumbbell, BarChart3, User, Loader2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { clsx } from 'clsx';
+import { Analytics } from '@vercel/analytics/react';
 
 export default function App() {
   const [user, setUser] = useState<UserProfile | null>(null);
@@ -164,6 +165,7 @@ export default function App() {
           </div>
         </nav>
       )}
+      <Analytics />
     </div>
   );
 }
