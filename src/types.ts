@@ -39,6 +39,8 @@ export interface UserProfile {
   level: number;
   lastWorkoutDate?: string;
   activePlanId?: string;
+  lastSessionDate?: string;
+  lastSessionDay?: number;
 }
 
 export interface Set {

@@ -1,26 +1,51 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { UserProfile, WorkoutType, ExerciseLog, BodyMetric, WorkoutPlan, WorkoutDayPlan } from '../types';
 import { db } from '../firebase';
-import { collection, query, where, orderBy, limit, getDocs, doc, getDoc } from 'firebase/firestore';
-import { format, startOfWeek, endOfWeek, subWeeks, isSameDay } from 'date-fns';
+import { collection, query, where, orderBy, limit, getDocs, doc, getDoc, onSnapshot, setDoc, updateDoc } from 'firebase/firestore';
 import { Trophy, Flame, TrendingUp, Calendar, ArrowUpRight, ArrowDownRight, Minus, Zap } from 'lucide-react';
 import { motion } from 'motion/react';
+import { DEFAULT_PLAN } from '../constants';
 
-export const Dashboard: React.FC<{ user: UserProfile, onStartWorkout: (plan: WorkoutDayPlan) => void }> = ({ user, onStartWorkout }) => {
+export const Dashboard: React.FC<{ user: UserProfile, onStartWorkout: (plan: WorkoutDayPlan, dayNumber: number) => void }> = ({ user, onStartWorkout }) => {
   const [lastLogs, setLastLogs] = useState<ExerciseLog[]>([]);
   const [lastMetrics, setLastMetrics] = useState<BodyMetric[]>([]);
   const [strengthScore, setStrengthScore] = useState(0);
   const [weightChange, setWeightChange] = useState(0);
   const [activePlan, setActivePlan] = useState<WorkoutPlan | null>(null);
+  const [selectedDay, setSelectedDay] = useState<number | null>(null);
+
+  const todayDayNum = useMemo(() => {
+    const day = new Date().getDay();
+    const dayMap: Record<number, number> = { 1: 1, 2: 2, 3: 3, 4: 4, 5: 5, 6: 6, 0: 7 };
+    return dayMap[day];
+  }, []);
 
   useEffect(() => {
+    let planUnsub: (() => void) | null = null;
     const fetchData = async () => {
-      // Fetch active plan
-      if (user.activePlanId) {
-        const planDoc = await getDoc(doc(db, 'workoutPlans', user.activePlanId));
-        if (planDoc.exists()) {
-          setActivePlan(planDoc.data() as WorkoutPlan);
+      // Ensure active plan exists; if not, seed a default one
+      let planId = user.activePlanId;
+      if (!planId) {
+        const planRef = doc(collection(db, 'workoutPlans'));
+        const newPlan: WorkoutPlan = { ...DEFAULT_PLAN, uid: user.uid, id: planRef.id } as WorkoutPlan;
+        await setDoc(planRef, newPlan);
+        await updateDoc(doc(db, 'users', user.uid), { activePlanId: planRef.id });
+        planId = planRef.id;
+      }
+
+      if (planId) {
+        const planRef = doc(db, 'workoutPlans', planId);
+        const snap = await getDoc(planRef);
+        if (!snap.exists()) {
+          await setDoc(planRef, { ...DEFAULT_PLAN, uid: user.uid, id: planId } as WorkoutPlan);
         }
+        planUnsub = onSnapshot(planRef, (planSnap) => {
+          if (planSnap.exists()) {
+            const data = planSnap.data() as WorkoutPlan;
+            setActivePlan(data);
+            setSelectedDay((prev) => prev ?? todayDayNum);
+          }
+        });
       }
 
       // Fetch last 3 big lifts for strength score
@@ -58,21 +83,17 @@ export const Dashboard: React.FC<{ user: UserProfile, onStartWorkout: (plan: Wor
       }
     };
     fetchData();
-  }, [user.uid, user.activePlanId]);
+    return () => { if (planUnsub) planUnsub(); };
+  }, [user.uid, user.activePlanId, todayDayNum]);
 
-  const getTodayWorkout = (): WorkoutDayPlan | null => {
-    if (!activePlan || !activePlan.days) return null;
-    const day = new Date().getDay(); // 0 (Sun) to 6 (Sat)
-    // Map JS getDay() to our 1-7 system (1=Mon, 7=Sun)
-    const dayMap: Record<number, number> = {
-      1: 1, 2: 2, 3: 3, 4: 4, 5: 5, 6: 6, 0: 7
-    };
-    const dayNum = dayMap[day];
-    // Firestore keys are strings, so we check both to be safe
+  const getWorkoutForDay = (dayNum: number | null): WorkoutDayPlan | null => {
+    if (!activePlan || !activePlan.days || dayNum == null) return null;
     return (activePlan.days[dayNum] || (activePlan.days as any)[dayNum.toString()]) || null;
   };
 
-  const todayWorkout = getTodayWorkout();
+  const todayWorkout = getWorkoutForDay(selectedDay ?? todayDayNum);
+  const todayKey = new Date().toISOString().slice(0, 10);
+  const sessionDoneToday = user.lastSessionDate === todayKey && (user.lastSessionDay ?? todayDayNum) === (selectedDay ?? todayDayNum);
 
   return (
     <div className="space-y-8 pb-24">
@@ -86,6 +107,25 @@ export const Dashboard: React.FC<{ user: UserProfile, onStartWorkout: (plan: Wor
           <span className="text-xl font-black italic">{user.streak}</span>
         </div>
       </header>
+
+      <div className="flex gap-2 overflow-x-auto pb-2 no-scrollbar">
+        {[1, 2, 3, 4, 5, 6, 7].map((d) => {
+          const dayPlan = getWorkoutForDay(d);
+          return (
+            <button
+              key={d}
+              onClick={() => setSelectedDay(d)}
+              className={
+                selectedDay === d
+                  ? 'flex-shrink-0 bg-emerald-500 text-black px-3 py-2 rounded-xl font-black uppercase text-xs'
+                  : 'flex-shrink-0 bg-zinc-900 text-zinc-400 px-3 py-2 rounded-xl font-bold text-xs border border-zinc-800'
+              }
+            >
+              D{d} {dayPlan ? `· ${dayPlan.type}` : ''}
+            </button>
+          );
+        })}
+      </div>
 
       <div className="grid grid-cols-2 gap-4">
         <motion.div 
@@ -141,12 +181,18 @@ export const Dashboard: React.FC<{ user: UserProfile, onStartWorkout: (plan: Wor
               </div>
               <h2 className="text-5xl font-black italic uppercase tracking-tighter text-white">{todayWorkout.type} Day</h2>
             </div>
-            <button 
-              onClick={() => onStartWorkout(todayWorkout)}
-              className="w-full bg-white text-emerald-600 font-black py-4 rounded-2xl hover:bg-emerald-50 transition-colors shadow-lg active:scale-95"
-            >
-              START SESSION
-            </button>
+            {sessionDoneToday ? (
+              <div className="w-full bg-white/90 text-emerald-700 font-black py-4 rounded-2xl border border-white/60 text-center">
+                SESSION COMPLETE
+              </div>
+            ) : (
+              <button 
+                onClick={() => onStartWorkout(todayWorkout, selectedDay ?? todayDayNum)}
+                className="w-full bg-white text-emerald-600 font-black py-4 rounded-2xl hover:bg-emerald-50 transition-colors shadow-lg active:scale-95"
+              >
+                START SESSION
+              </button>
+            )}
           </div>
         </div>
       ) : (

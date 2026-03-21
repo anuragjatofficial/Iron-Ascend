@@ -17,18 +17,23 @@ import { clsx } from 'clsx';
 export default function App() {
   const [user, setUser] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'workout' | 'analytics' | 'profile' | 'plan-editor'>('dashboard');
-  const [activeWorkout, setActiveWorkout] = useState<WorkoutDayPlan | null>(null);
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'analytics' | 'profile' | 'plan-editor'>('dashboard');
+  const [activeWorkout, setActiveWorkout] = useState<{ plan: WorkoutDayPlan, dayNumber: number } | null>(null);
 
   useEffect(() => {
+    let userDocUnsub: (() => void) | null = null;
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
+      // Clean up old user doc listener when auth user changes
+      if (userDocUnsub) {
+        userDocUnsub();
+        userDocUnsub = null;
+      }
+
       if (firebaseUser) {
-        // Use onSnapshot for real-time user updates
         const userDocRef = doc(db, 'users', firebaseUser.uid);
-        const unsubDoc = onSnapshot(userDocRef, (docSnap) => {
+        userDocUnsub = onSnapshot(userDocRef, (docSnap) => {
           if (docSnap.exists()) {
             const userData = docSnap.data() as UserProfile;
-            // Calculate level based on XP
             const level = Math.floor(userData.xp / 1000) + 1;
             setUser({ ...userData, level });
           } else {
@@ -39,13 +44,16 @@ export default function App() {
           console.error('User doc snapshot error:', error);
           setLoading(false);
         });
-        return () => unsubDoc();
       } else {
         setUser(null);
         setLoading(false);
       }
     });
-    return () => unsubscribe();
+
+    return () => {
+      if (userDocUnsub) userDocUnsub();
+      unsubscribe();
+    };
   }, []);
 
   if (loading) {
@@ -67,7 +75,8 @@ export default function App() {
         <ErrorBoundary>
           <WorkoutTracker 
             user={user} 
-            plan={activeWorkout} 
+            plan={activeWorkout.plan} 
+            dayNumber={activeWorkout.dayNumber}
             onComplete={() => {
               setActiveWorkout(null);
               setActiveTab('dashboard');
@@ -81,7 +90,7 @@ export default function App() {
       case 'dashboard':
         return (
           <ErrorBoundary>
-            <Dashboard user={user} onStartWorkout={(plan) => setActiveWorkout(plan)} />
+            <Dashboard user={user} onStartWorkout={(plan, dayNumber) => setActiveWorkout({ plan, dayNumber })} />
           </ErrorBoundary>
         );
       case 'analytics':
@@ -109,7 +118,7 @@ export default function App() {
       default:
         return (
           <ErrorBoundary>
-            <Dashboard user={user} onStartWorkout={(plan) => setActiveWorkout(plan)} />
+            <Dashboard user={user} onStartWorkout={(plan, dayNumber) => setActiveWorkout({ plan, dayNumber })} />
           </ErrorBoundary>
         );
     }
@@ -120,7 +129,7 @@ export default function App() {
       <main className="max-w-md mx-auto px-6 pt-12 min-h-screen">
         <AnimatePresence mode="wait">
           <motion.div
-            key={activeTab + (activeWorkout ? activeWorkout.type + activeWorkout.dayType : '')}
+            key={activeTab + (activeWorkout ? activeWorkout.plan.type + activeWorkout.plan.dayType : '')}
             initial={{ opacity: 0, x: 10 }}
             animate={{ opacity: 1, x: 0 }}
             exit={{ opacity: 0, x: -10 }}
@@ -139,12 +148,6 @@ export default function App() {
               onClick={() => setActiveTab('dashboard')} 
               icon={<LayoutGrid className="w-6 h-6" />} 
               label="Home"
-            />
-            <NavButton 
-              active={activeTab === 'workout'} 
-              onClick={() => setActiveTab('dashboard')} // Redirect to dashboard to start workout
-              icon={<Dumbbell className="w-6 h-6" />} 
-              label="Train"
             />
             <NavButton 
               active={activeTab === 'analytics'} 

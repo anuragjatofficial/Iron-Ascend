@@ -1,10 +1,10 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { db } from '../firebase';
-import { collection, query, where, orderBy, getDocs } from 'firebase/firestore';
+import { collection, query, where, orderBy, getDocs, limit } from 'firebase/firestore';
 import { ExerciseLog, BodyMetric, UserProfile } from '../types';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, AreaChart, Area } from 'recharts';
-import { format, subDays, parseISO } from 'date-fns';
-import { TrendingUp, AlertTriangle, Zap, Target, ArrowUpRight, ArrowDownRight } from 'lucide-react';
+import { format, parseISO } from 'date-fns';
+import { TrendingUp, AlertTriangle, Zap, Target, Activity } from 'lucide-react';
 import { motion } from 'motion/react';
 
 export const ProgressCharts: React.FC<{ user: UserProfile }> = ({ user }) => {
@@ -12,15 +12,32 @@ export const ProgressCharts: React.FC<{ user: UserProfile }> = ({ user }) => {
   const [metrics, setMetrics] = useState<BodyMetric[]>([]);
   const [loading, setLoading] = useState(true);
   const [isMounted, setIsMounted] = useState(false);
+  const [showAllSessions, setShowAllSessions] = useState(false);
 
   useEffect(() => {
     setIsMounted(true);
     const fetchData = async () => {
-      const logsSnap = await getDocs(query(collection(db, 'exerciseLogs'), where('uid', '==', user.uid), orderBy('date', 'asc')));
-      const metricsSnap = await getDocs(query(collection(db, 'bodyMetrics'), where('uid', '==', user.uid), orderBy('date', 'asc')));
+      const logsSnap = await getDocs(
+        query(
+          collection(db, 'exerciseLogs'),
+          where('uid', '==', user.uid),
+          orderBy('date', 'desc'),
+          limit(200)
+        )
+      );
+      const metricsSnap = await getDocs(
+        query(
+          collection(db, 'bodyMetrics'),
+          where('uid', '==', user.uid),
+          orderBy('date', 'desc'),
+          limit(90)
+        )
+      );
       
-      setLogs(logsSnap.docs.map(d => ({ ...d.data(), id: d.id } as ExerciseLog)));
-      setMetrics(metricsSnap.docs.map(d => ({ ...d.data(), id: d.id } as BodyMetric)));
+      const logData = logsSnap.docs.map(d => ({ ...d.data(), id: d.id } as ExerciseLog)).reverse();
+      const metricData = metricsSnap.docs.map(d => ({ ...d.data(), id: d.id } as BodyMetric)).reverse();
+      setLogs(logData);
+      setMetrics(metricData);
       setLoading(false);
     };
     fetchData();
@@ -67,6 +84,20 @@ export const ProgressCharts: React.FC<{ user: UserProfile }> = ({ user }) => {
 
   const alerts = getPlateauAlerts();
 
+  const groupedLogs = useMemo(() => {
+    if (!logs) return [] as { date: string; items: ExerciseLog[] }[];
+    const byDate: Record<string, ExerciseLog[]> = {};
+    logs.forEach((log) => {
+      if (!log?.date) return;
+      const key = log.date.slice(0, 10);
+      if (!byDate[key]) byDate[key] = [];
+      byDate[key].push(log);
+    });
+    return Object.entries(byDate)
+      .sort((a, b) => (a[0] < b[0] ? 1 : -1))
+      .map(([date, items]) => ({ date, items: items.sort((a, b) => (a.exerciseName > b.exerciseName ? 1 : -1)) }));
+  }, [logs]);
+
   if (loading || !isMounted) return <div className="flex items-center justify-center h-64 text-zinc-500 font-black italic uppercase tracking-widest">Analyzing Data...</div>;
 
   return (
@@ -91,6 +122,60 @@ export const ProgressCharts: React.FC<{ user: UserProfile }> = ({ user }) => {
           ))}
         </div>
       )}
+
+      <div className="bg-zinc-900/50 border border-zinc-800 p-6 rounded-3xl space-y-4">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Activity className="w-5 h-5 text-emerald-500" />
+            <h3 className="text-sm font-black italic uppercase tracking-widest">Session Timeline</h3>
+          </div>
+          <button
+            onClick={() => setShowAllSessions(!showAllSessions)}
+            className="text-xs font-black uppercase tracking-widest text-emerald-400 hover:text-emerald-300 transition-colors cursor-pointer"
+          >
+            {showAllSessions ? 'View Recent' : 'View Older'}
+          </button>
+        </div>
+
+        <div className="space-y-3 max-h-[480px] overflow-y-auto pr-1">
+          {(showAllSessions ? groupedLogs : groupedLogs.slice(0, 6)).map((group) => {
+            const dayLabel = format(parseISO(group.date), 'EEE, MMM dd');
+            const volumeTotal = group.items.reduce((acc, log) => acc + (log.sets || []).reduce((s, set) => s + (set?.weight || 0) * (set?.reps || 0), 0), 0);
+            return (
+              <div key={group.date} className="bg-black/40 border border-zinc-800/60 rounded-2xl p-4 space-y-3 shadow-inner">
+                <div className="flex items-center justify-between">
+                  <div className="space-y-1">
+                    <div className="text-[11px] font-black text-zinc-500 uppercase tracking-[0.2em]">{dayLabel}</div>
+                    <div className="text-xs font-bold text-zinc-400">{group.items.length} exercises · {(volumeTotal || 0).toLocaleString()} kg·reps</div>
+                  </div>
+                  <span className="text-[10px] font-black uppercase tracking-widest px-2 py-1 rounded-full bg-zinc-900 border border-zinc-800 text-emerald-400">Day Log</span>
+                </div>
+                <div className="grid grid-cols-1 gap-2">
+                  {group.items.map((log) => {
+                    const topWeight = Math.max(...(log.sets || []).map(s => s?.weight || 0));
+                    const topReps = (log.sets || [])[0]?.reps || 0;
+                    return (
+                      <div key={log.id} className="flex items-center justify-between bg-zinc-900/40 rounded-xl border border-zinc-800/70 px-3 py-2">
+                        <div className="space-y-0.5">
+                          <div className="text-sm font-black text-white leading-tight">{log.exerciseName}</div>
+                          <div className="text-[11px] font-bold text-zinc-500">{topWeight} kg × {topReps} reps</div>
+                        </div>
+                        <div className="flex flex-col items-end gap-1">
+                          <span className="text-[10px] font-black uppercase tracking-widest px-2 py-1 rounded-full bg-zinc-950 border border-zinc-800 text-emerald-400">{log.progression || 'PROGRESS'}</span>
+                          <span className="text-[10px] font-bold text-zinc-500 uppercase">Lvl {log.level || 0}</span>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            );
+          })}
+          {groupedLogs.length === 0 && (
+            <div className="text-center text-zinc-500 text-sm font-bold">No logs yet. Start tracking to see history.</div>
+          )}
+        </div>
+      </div>
 
       <div className="bg-zinc-900/50 border border-zinc-800 p-6 rounded-3xl space-y-6">
         <div className="flex items-center justify-between">
